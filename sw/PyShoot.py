@@ -47,6 +47,13 @@ class Game(object):
         # Game state attributes
         self.game_started = False            # Flag to track if begin_game has been called for this session
         self.game_paused = False             # Flag to track if game is paused
+        self.upgrade_available = False       # Flag to track if upgrade menu should be shown
+        self.last_upgrade_score = 0          # Track the last score when upgrade was offered
+        
+        # Weapon upgrade system
+        self.left_weapon_level = 1           # Left click weapon level (bullets)
+        self.right_weapon_level = 1          # Right click weapon level (rockets)
+        self.upgrade_threshold = 200         # Points needed for first upgrade
         
         # Enemy system attributes
         self.enemies = []                    # List to store active enemies
@@ -103,6 +110,14 @@ class Game(object):
                         self.right_mouse_held = False
                     else:
                         print("Game unpaused")
+            
+            # Handle upgrade selection
+            elif event.type == pygame.KEYDOWN and event.key == pygame.K_1:
+                if self.upgrade_available:
+                    self.upgrade_left_weapon()
+            elif event.type == pygame.KEYDOWN and event.key == pygame.K_2:
+                if self.upgrade_available:
+                    self.upgrade_right_weapon()
             
             # Handle key releases
             elif event.type == pygame.KEYUP:
@@ -184,6 +199,9 @@ class Game(object):
             # Check for rocket-enemy collisions
             self.check_rocket_enemy_collisions()
             
+            # Check for upgrade availability
+            self.check_upgrade_availability()
+            
             # Update muzzle flash animation
             self.update_muzzle_flash()
             
@@ -219,6 +237,10 @@ class Game(object):
             # Game is paused - show pause screen
             self.user_character(screen)        # Keep showing the game state
             self.pause_screen(screen)          # Overlay pause menu
+        elif self.upgrade_available:
+            # Upgrade menu is active - show upgrade screen
+            self.user_character(screen)        # Keep showing the game state
+            self.upgrade_screen(screen)        # Overlay upgrade menu
         else:
             # Game is running - show the character and gameplay
             self.user_character(screen)
@@ -368,14 +390,19 @@ class Game(object):
         # Display current score
         screen.blit(info.render("Score: " + str(self.score)[:2], True, BLACK), [0, 30])
         
+        # Display weapon levels
+        screen.blit(info.render("L.Gun: L" + str(self.left_weapon_level), True, BLACK), [0, 45])
+        screen.blit(info.render("R.Gun: L" + str(self.right_weapon_level), True, BLACK), [0, 60])
+        
     def user_character(self, screen):
         # Display the player's character (aircraft) that follows the mouse
         
         # Get constrained mouse position
         mx, my = self.get_constrained_position()
     
-        # Load the aircraft image from the resources folder
-        file_path = os.path.realpath('./res/aircrafts/images/aircraft_1.png')
+        # Load the aircraft image from the resources folder - use path relative to script location
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        file_path = os.path.join(script_dir, '..', 'res', 'aircrafts', 'images', 'aircraft_1.png')
         alpha_image_surface = pygame.image.load(file_path).convert_alpha()  # Load with transparency
         
         # Draw the aircraft at the constrained position
@@ -454,7 +481,8 @@ class Game(object):
         mx, my = pygame.mouse.get_pos()
         
         # Load aircraft image to get dimensions (could be optimized by caching)
-        file_path = os.path.realpath('./res/aircrafts/images/aircraft_1.png')
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        file_path = os.path.join(script_dir, '..', 'res', 'aircrafts', 'images', 'aircraft_1.png')
         try:
             alpha_image_surface = pygame.image.load(file_path).convert_alpha()
             aircraft_width = alpha_image_surface.get_width()
@@ -481,7 +509,7 @@ class Game(object):
             bullet = {
                 'x': mx + 25,  # Center of aircraft (assuming aircraft width ~50px)
                 'y': my,       # Top of aircraft
-                'speed': 8     # Bullet speed (pixels per frame)
+                'speed': 8 + (self.left_weapon_level - 1) * 2  # Bullet speed increases with level
             }
             
             self.bullets.append(bullet)
@@ -490,8 +518,9 @@ class Game(object):
             self.is_firing = True
             self.muzzle_flash_frame = 0
             
-            # Set cooldown
-            self.fire_cooldown = self.fire_rate
+            # Set cooldown (faster firing at higher levels)
+            base_fire_rate = max(2, self.fire_rate - (self.left_weapon_level - 1))
+            self.fire_cooldown = base_fire_rate
             
             print(f"Fired bullet at ({mx}, {my})")
     
@@ -529,11 +558,11 @@ class Game(object):
             frame_index = (self.muzzle_flash_frame * 3) % 24  # Speed up animation
             
             # Load the muzzle flash image
-            muzzle_file = f'./res/explosions/images/muzzle/muzzle2_{frame_index:04d}.png'
-            muzzle_path = os.path.realpath(muzzle_file)
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            muzzle_file = os.path.join(script_dir, '..', 'res', 'explosions', 'images', 'muzzle', f'muzzle2_{frame_index:04d}.png')
             
             try:
-                muzzle_surface = pygame.image.load(muzzle_path).convert_alpha()
+                muzzle_surface = pygame.image.load(muzzle_file).convert_alpha()
                 
                 # Position muzzle flash at the front of the aircraft
                 muzzle_x = aircraft_x + 25 - (muzzle_surface.get_width() // 2)  # Center horizontally
@@ -563,7 +592,7 @@ class Game(object):
             rocket = {
                 'x': mx + 25,  # Center of aircraft (assuming aircraft width ~50px)
                 'y': my,       # Top of aircraft
-                'speed': 6     # Rocket speed (slower than bullets)
+                'speed': 6 + (self.right_weapon_level - 1)  # Rocket speed increases with level
             }
             
             self.rockets.append(rocket)
@@ -572,8 +601,9 @@ class Game(object):
             self.is_rocket_firing = True
             self.rocket_flash_frame = 0
             
-            # Set cooldown
-            self.rocket_fire_cooldown = self.rocket_fire_rate
+            # Set cooldown (faster firing at higher levels)
+            base_rocket_rate = max(3, self.rocket_fire_rate - (self.right_weapon_level - 1))
+            self.rocket_fire_cooldown = base_rocket_rate
             
             print(f"Fired rocket at ({mx}, {my})")
     
@@ -611,11 +641,11 @@ class Game(object):
             frame_index = (self.rocket_flash_frame * 2) % 16  # Speed up animation
             
             # Load the rocket flame image
-            rocket_file = f'./res/explosions/images/rocket_flame/rocket_1_{frame_index:04d}.png'
-            rocket_path = os.path.realpath(rocket_file)
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            rocket_file = os.path.join(script_dir, '..', 'res', 'explosions', 'images', 'rocket_flame', f'rocket_1_{frame_index:04d}.png')
             
             try:
-                rocket_surface = pygame.image.load(rocket_path).convert_alpha()
+                rocket_surface = pygame.image.load(rocket_file).convert_alpha()
                 
                 # Position rocket flame at the front of the aircraft
                 rocket_x = aircraft_x + 25 - (rocket_surface.get_width() // 2)  # Center horizontally
@@ -642,7 +672,8 @@ class Game(object):
             
             # Calculate enemy size (10% bigger than player)
             try:
-                player_file = os.path.realpath('./res/aircrafts/images/aircraft_1.png')
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                player_file = os.path.join(script_dir, '..', 'res', 'aircrafts', 'images', 'aircraft_1.png')
                 player_surface = pygame.image.load(player_file).convert_alpha()
                 enemy_width = int(player_surface.get_width() * 1.1)
                 enemy_height = int(player_surface.get_height() * 1.1)
@@ -727,14 +758,14 @@ class Game(object):
         for enemy in self.enemies:
             # Load enemy sprite if not already loaded
             if enemy['surface'] is None:
-                sprite_file = f'./res/SpaceShipsPack/{enemy["sprite"]}'
-                sprite_path = os.path.realpath(sprite_file)
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                sprite_file = os.path.join(script_dir, '..', 'res', 'SpaceShipsPack', enemy["sprite"])
                 
                 try:
-                    original_surface = pygame.image.load(sprite_path).convert_alpha()
+                    original_surface = pygame.image.load(sprite_file).convert_alpha()
                     
                     # Get player character dimensions for scaling reference
-                    player_file = os.path.realpath('./res/aircrafts/images/aircraft_1.png')
+                    player_file = os.path.join(script_dir, '..', 'res', 'aircrafts', 'images', 'aircraft_1.png')
                     try:
                         player_surface = pygame.image.load(player_file).convert_alpha()
                         player_width = player_surface.get_width()
@@ -791,9 +822,11 @@ class Game(object):
                 if self.check_collision(bullet, enemy):
                     # Bullet hit enemy
                     bullets_to_remove.append(bullet_idx)
-                    enemy['health'] -= 1.5  # Bullets do 1.5 damage (4 hits to kill enemy with 6 health)
+                    # Damage increases with weapon level
+                    damage = 1.5 + (self.left_weapon_level - 1) * 0.5
+                    enemy['health'] -= damage
                     
-                    print(f"Enemy hit! Health: {enemy['health']}")
+                    print(f"Enemy hit! Health: {enemy['health']} (Damage: {damage})")
                     
                     # Check if enemy is destroyed
                     if enemy['health'] <= 0:
@@ -823,9 +856,11 @@ class Game(object):
                 if self.check_collision(rocket, enemy):
                     # Rocket hit enemy
                     rockets_to_remove.append(rocket_idx)
-                    enemy['health'] -= 2  # Rockets do 2 damage (3 hits to kill enemy with 6 health)
+                    # Damage increases with weapon level
+                    damage = 2.0 + (self.right_weapon_level - 1) * 0.5
+                    enemy['health'] -= damage
                     
-                    print(f"Enemy hit by rocket! Health: {enemy['health']}")
+                    print(f"Enemy hit by rocket! Health: {enemy['health']} (Damage: {damage})")
                     
                     # Check if enemy is destroyed
                     if enemy['health'] <= 0:
@@ -864,6 +899,116 @@ class Game(object):
                 projectile['x'] <= enemy['x'] + enemy_width and
                 projectile['y'] >= enemy['y'] and 
                 projectile['y'] <= enemy['y'] + enemy_height)
+
+    def check_upgrade_availability(self):
+        # Check if player has enough points for an upgrade
+        if self.score >= self.last_upgrade_score + self.upgrade_threshold and not self.upgrade_available:
+            self.upgrade_available = True
+            print(f"Upgrade available! Score: {self.score}")
+
+    def upgrade_screen(self, screen):
+        # Display the upgrade selection screen
+        print('upgrade screen')
+        
+        # Create a semi-transparent overlay
+        overlay = pygame.Surface((SCREEN_SIZE[0], SCREEN_SIZE[1]))
+        overlay.set_alpha(128)  # Semi-transparent
+        overlay.fill(BLACK)     # Black overlay
+        screen.blit(overlay, (0, 0))
+        
+        # Create fonts
+        title_font = pygame.font.SysFont("serif", 40)
+        option_font = pygame.font.SysFont("serif", 25)
+        info_font = pygame.font.SysFont("serif", 18)
+        
+        # Calculate upgrade costs
+        left_cost = self.get_upgrade_cost(self.left_weapon_level)
+        right_cost = self.get_upgrade_cost(self.right_weapon_level)
+        
+        # Render text
+        title_text = title_font.render("WEAPON UPGRADE", True, WHITE)
+        left_option = option_font.render(f"1 - Upgrade Left Gun (Level {self.left_weapon_level})", True, WHITE)
+        right_option = option_font.render(f"2 - Upgrade Right Gun (Level {self.right_weapon_level})", True, WHITE)
+        left_cost_text = info_font.render(f"Cost: {left_cost} points", True, WHITE)
+        right_cost_text = info_font.render(f"Cost: {right_cost} points", True, WHITE)
+        left_info = info_font.render("+ Speed, + Damage, + Fire Rate", True, WHITE)
+        right_info = info_font.render("+ Speed, + Damage, + Fire Rate", True, WHITE)
+        score_text = info_font.render(f"Current Score: {self.score}", True, WHITE)
+        
+        # Position text
+        screen_center_x = SCREEN_SIZE[0] // 2
+        screen_center_y = SCREEN_SIZE[1] // 2
+        
+        # Title
+        title_x = screen_center_x - (title_text.get_width() // 2)
+        title_y = screen_center_y - 120
+        screen.blit(title_text, [title_x, title_y])
+        
+        # Score
+        score_x = screen_center_x - (score_text.get_width() // 2)
+        score_y = title_y + title_text.get_height() + 20
+        screen.blit(score_text, [score_x, score_y])
+        
+        # Left weapon option
+        left_x = screen_center_x - (left_option.get_width() // 2)
+        left_y = score_y + score_text.get_height() + 30
+        color = WHITE if self.score >= left_cost else (128, 128, 128)  # Gray if can't afford
+        left_option_colored = option_font.render(f"1 - Upgrade Left Gun (Level {self.left_weapon_level})", True, color)
+        screen.blit(left_option_colored, [left_x, left_y])
+        
+        # Left weapon cost and info
+        left_cost_x = screen_center_x - (left_cost_text.get_width() // 2)
+        screen.blit(left_cost_text, [left_cost_x, left_y + 25])
+        left_info_x = screen_center_x - (left_info.get_width() // 2)
+        screen.blit(left_info, [left_info_x, left_y + 45])
+        
+        # Right weapon option
+        right_x = screen_center_x - (right_option.get_width() // 2)
+        right_y = left_y + 90
+        color = WHITE if self.score >= right_cost else (128, 128, 128)  # Gray if can't afford
+        right_option_colored = option_font.render(f"2 - Upgrade Right Gun (Level {self.right_weapon_level})", True, color)
+        screen.blit(right_option_colored, [right_x, right_y])
+        
+        # Right weapon cost and info
+        right_cost_x = screen_center_x - (right_cost_text.get_width() // 2)
+        screen.blit(right_cost_text, [right_cost_x, right_y + 25])
+        right_info_x = screen_center_x - (right_info.get_width() // 2)
+        screen.blit(right_info, [right_info_x, right_y + 45])
+
+    def get_upgrade_cost(self, current_level):
+        # Calculate upgrade cost based on current level
+        if current_level == 1:
+            return 200
+        elif current_level == 2:
+            return 300
+        elif current_level == 3:
+            return 400
+        else:
+            return 500 + (current_level - 4) * 100  # Exponential cost increase
+
+    def upgrade_left_weapon(self):
+        # Upgrade left click weapon (bullets)
+        cost = self.get_upgrade_cost(self.left_weapon_level)
+        if self.score >= cost:
+            self.score -= cost
+            self.left_weapon_level += 1
+            self.upgrade_available = False
+            self.last_upgrade_score = self.score
+            print(f"Left weapon upgraded to level {self.left_weapon_level}! Score: {self.score}")
+        else:
+            print("Not enough points for left weapon upgrade!")
+
+    def upgrade_right_weapon(self):
+        # Upgrade right click weapon (rockets)
+        cost = self.get_upgrade_cost(self.right_weapon_level)
+        if self.score >= cost:
+            self.score -= cost
+            self.right_weapon_level += 1
+            self.upgrade_available = False
+            self.last_upgrade_score = self.score
+            print(f"Right weapon upgraded to level {self.right_weapon_level}! Score: {self.score}")
+        else:
+            print("Not enough points for right weapon upgrade!")
 
     def run_main_loop(self):
         # Main game loop - runs the entire game
