@@ -2,6 +2,7 @@
 
 import os
 import pygame
+import random
 
 # Screen constants - defines the game window size
 SCREEN_SIZE = (800, 600)  # Width: 800px, Height: 600px
@@ -24,6 +25,40 @@ class Game(object):
         self.session_number = session_number  # Number of games played
         self.game_active = False             # Flag to track if game is currently running
         self.cloud_offset = 0                # Offset for cloud movement animation
+        
+        # Firing system attributes
+        self.is_firing = False               # Flag to track if currently firing
+        self.muzzle_flash_frame = 0          # Current frame of muzzle flash animation
+        self.muzzle_flash_duration = 8       # How long muzzle flash lasts (frames)
+        self.bullets = []                    # List to store active bullets
+        self.fire_cooldown = 0               # Cooldown between shots
+        self.fire_rate = 5                   # Minimum frames between shots (reduced for faster firing)
+        self.mouse_held = False              # Flag to track if mouse button is held down
+        
+        # Rocket firing system attributes
+        self.is_rocket_firing = False        # Flag to track if currently rocket firing
+        self.rocket_flash_frame = 0          # Current frame of rocket flash animation
+        self.rocket_flash_duration = 8       # How long rocket flash lasts (frames)
+        self.rockets = []                    # List to store active rockets
+        self.rocket_fire_cooldown = 0        # Cooldown between rocket shots
+        self.rocket_fire_rate = 7            # 30% slower than bullets (5 * 1.3 = 6.5, rounded to 7)
+        self.right_mouse_held = False        # Flag to track if right mouse button is held down
+        
+        # Game state attributes
+        self.game_started = False            # Flag to track if begin_game has been called for this session
+        self.game_paused = False             # Flag to track if game is paused
+        
+        # Enemy system attributes
+        self.enemies = []                    # List to store active enemies
+        self.max_enemies = 10               # Maximum number of enemies on screen at once
+        self.enemy_spawn_cooldown = 0       # Cooldown between enemy spawns
+        self.enemy_spawn_rate = 60          # Frames between enemy spawns (1 second at 60 FPS)
+        self.enemy_health = 6               # Enemy health (6 for bullets=4 hits, rockets=3 hits with 2 damage each)
+        self.enemy_sprites = [              # List of available enemy sprite names
+            'C1.png', 'C2.png', 'C3.png', 'C4.png', 'C5.png', 'C6.png', 'C7.png', 'C8.png', 'C9.png',
+            'C10.png', 'C11.png', 'C12.png', 'C13.png', 'C14.png', 'C15.png', 'C16.png', 'C17.png', 'C18.png'
+        ]
+        
         pygame.init()                        # Initialize pygame modules
         pygame.mouse.set_visible(False)      # Hide mouse cursor during gameplay
         pygame.display.set_caption('PyShoot') # Set window title
@@ -41,6 +76,33 @@ class Game(object):
             # Handle space bar key press (down)
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
                 print("User pressed the space bar")
+                # Fire weapon if game is active and not paused
+                if self.game_active and not self.game_paused:
+                    self.fire_weapon()
+            
+            # Handle ESC key press - exit to main menu
+            elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                print("User pressed ESC - returning to main menu")
+                if self.game_active:
+                    self.game_active = False  # Exit to main menu
+                    # Reset game state
+                    self.mouse_held = False
+                    self.right_mouse_held = False
+                    self.is_firing = False
+                    self.is_rocket_firing = False
+                    self.game_paused = False  # Reset pause state
+            
+            # Handle P key press - toggle pause
+            elif event.type == pygame.KEYDOWN and event.key == pygame.K_p:
+                if self.game_active:
+                    self.game_paused = not self.game_paused  # Toggle pause state
+                    if self.game_paused:
+                        print("Game paused")
+                        # Stop continuous firing when pausing
+                        self.mouse_held = False
+                        self.right_mouse_held = False
+                    else:
+                        print("Game unpaused")
             
             # Handle key releases
             elif event.type == pygame.KEYUP:
@@ -50,6 +112,7 @@ class Game(object):
                     if not self.game_active:
                         self.session_number += 1  # Increment game session
                         self.game_active = True   # Activate the game
+                        self.game_started = False # Reset game started flag for new session
                         print('')
                 elif event.key == pygame.K_l:
                     print("Lose Game!")
@@ -59,18 +122,84 @@ class Game(object):
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1:  # Left mouse button (1=left, 2=middle, 3=right)
                     print("User clicked left mouse button")
-                    # Start game only if it's not already active
-                    if not self.game_active:
+                    if self.game_active and not self.game_paused:
+                        # Set mouse held flag for continuous firing
+                        self.mouse_held = True
+                        # Fire weapon immediately
+                        self.fire_weapon()
+                    elif not self.game_active:
+                        # Start game only if it's not already active
                         self.session_number += 1  # Increment game session
                         self.game_active = True   # Activate the game
+                        self.game_started = False # Reset game started flag for new session
                         print('Game started with mouse click')
+                elif event.button == 3:  # Right mouse button
+                    print("User clicked right mouse button")
+                    if self.game_active and not self.game_paused:
+                        # Set right mouse held flag for continuous rocket firing
+                        self.right_mouse_held = True
+                        # Fire rocket immediately
+                        self.fire_rocket()
+            
+            # Handle mouse button releases
+            elif event.type == pygame.MOUSEBUTTONUP:
+                if event.button == 1:  # Left mouse button released
+                    print("User released left mouse button")
+                    self.mouse_held = False  # Stop continuous firing
+                elif event.button == 3:  # Right mouse button released
+                    print("User released right mouse button")
+                    self.right_mouse_held = False  # Stop continuous rocket firing
 
         return False  # Continue running the game
 
     def run_logic(self):
-        # Execute game logic only when the game is active
-        if self.game_active:
-            self.begin_game()  # Run the main game logic
+        # Execute game logic only when the game is active and not paused
+        if self.game_active and not self.game_paused:
+            # Call begin_game only once when the game starts
+            if not self.game_started:
+                self.begin_game()  # Run the main game initialization
+                self.game_started = True  # Mark game as started
+            
+            # Handle continuous firing while mouse is held
+            if self.mouse_held and self.fire_cooldown <= 0:
+                self.fire_weapon()
+            
+            # Handle continuous rocket firing while right mouse is held
+            if self.right_mouse_held and self.rocket_fire_cooldown <= 0:
+                self.fire_rocket()
+            
+            # Update bullet positions
+            self.update_bullets()
+            
+            # Update rocket positions
+            self.update_rockets()
+            
+            # Update enemy positions and spawn new enemies
+            self.update_enemies()
+            self.spawn_enemies()
+            
+            # Check for bullet-enemy collisions
+            self.check_bullet_enemy_collisions()
+            
+            # Check for rocket-enemy collisions
+            self.check_rocket_enemy_collisions()
+            
+            # Update muzzle flash animation
+            self.update_muzzle_flash()
+            
+            # Update rocket flash animation
+            self.update_rocket_flash()
+            
+            # Update fire cooldowns
+            if self.fire_cooldown > 0:
+                self.fire_cooldown -= 1
+            if self.rocket_fire_cooldown > 0:
+                self.rocket_fire_cooldown -= 1
+            if self.enemy_spawn_cooldown > 0:
+                self.enemy_spawn_cooldown -= 1
+            
+            # Update cloud animation - make clouds move downward smoothly
+            self.cloud_offset += 0.5  # Move clouds down by 0.5 pixels per frame for smoother movement
 
     def display_frame(self, screen):
         # Clear screen and draw all visual elements
@@ -86,6 +215,10 @@ class Game(object):
                 self.game_over_screen(screen)  # Show game over if we've played before
             else:
                 self.title_screen(screen)      # Show title screen for first time
+        elif self.game_paused:
+            # Game is paused - show pause screen
+            self.user_character(screen)        # Keep showing the game state
+            self.pause_screen(screen)          # Overlay pause menu
         else:
             # Game is running - show the character and gameplay
             self.user_character(screen)
@@ -95,11 +228,23 @@ class Game(object):
         pygame.display.flip()  # Update the display with all drawn elements
 
     def begin_game(self):
-        # Main gameplay logic goes here (currently just a placeholder)
-        print('Begin game now')
+        # Game initialization logic - runs only once when game starts
+        print('Game initialized!')
         
-        # Update cloud animation - make clouds move downward smoothly
-        self.cloud_offset += 0.5  # Move clouds down by 0.5 pixels per frame for smoother movement
+        # Clear any existing projectiles from previous sessions
+        self.bullets = []
+        self.rockets = []
+        self.enemies = []
+        
+        # Reset firing states
+        self.is_firing = False
+        self.is_rocket_firing = False
+        self.mouse_held = False
+        self.right_mouse_held = False
+        
+        # Reset cooldowns
+        self.fire_cooldown = 0
+        self.rocket_fire_cooldown = 0
 
     def game_over_screen(self, screen):
         # Display the game over screen with restart instructions
@@ -136,6 +281,41 @@ class Game(object):
         center_y = (SCREEN_SIZE[1] // 2) - (begin_text.get_height() // 2)
         screen.blit(begin_text, [center_x, center_y])  # Draw the text
 
+    def pause_screen(self, screen):
+        # Display the pause screen overlay
+        print('pause screen')
+        
+        # Create a semi-transparent overlay
+        overlay = pygame.Surface((SCREEN_SIZE[0], SCREEN_SIZE[1]))
+        overlay.set_alpha(128)  # Semi-transparent (0=transparent, 255=opaque)
+        overlay.fill(BLACK)     # Black overlay
+        screen.blit(overlay, (0, 0))
+        
+        # Create fonts for different text sizes
+        pause_font = pygame.font.SysFont("serif", 50)    # Large font for "PAUSED"
+        instruction_font = pygame.font.SysFont("serif", 25)  # Medium font for instructions
+        
+        # Render text surfaces with white color for visibility on dark overlay
+        pause_text = pause_font.render("PAUSED", True, WHITE)
+        resume_text = instruction_font.render("Press P to resume", True, WHITE)
+        menu_text = instruction_font.render("Press ESC for main menu", True, WHITE)
+        
+        # Calculate center positions for text
+        # Main "PAUSED" text
+        pause_x = (SCREEN_SIZE[0] // 2) - (pause_text.get_width() // 2)
+        pause_y = (SCREEN_SIZE[1] // 2) - (pause_text.get_height() // 2) - 40
+        screen.blit(pause_text, [pause_x, pause_y])
+        
+        # Resume instruction
+        resume_x = (SCREEN_SIZE[0] // 2) - (resume_text.get_width() // 2)
+        resume_y = pause_y + pause_text.get_height() + 20
+        screen.blit(resume_text, [resume_x, resume_y])
+        
+        # Menu instruction
+        menu_x = (SCREEN_SIZE[0] // 2) - (menu_text.get_width() // 2)
+        menu_y = resume_y + resume_text.get_height() + 10
+        screen.blit(menu_text, [menu_x, menu_y])
+
     def user_debug_display(self, screen):
         # Display debug information in the top-left corner
         info = pygame.font.SysFont("serif", 15)  # Small font for debug text
@@ -152,22 +332,36 @@ class Game(object):
     def user_character(self, screen):
         # Display the player's character (aircraft) that follows the mouse
         
-        # Get current mouse position
-        mx, my = pygame.mouse.get_pos()
+        # Get constrained mouse position
+        mx, my = self.get_constrained_position()
     
         # Load the aircraft image from the resources folder
         file_path = os.path.realpath('./res/aircrafts/images/aircraft_1.png')
         alpha_image_surface = pygame.image.load(file_path).convert_alpha()  # Load with transparency
         
-        # Draw the aircraft at the mouse position
+        # Draw the aircraft at the constrained position
         screen.blit(alpha_image_surface, (mx, my))
+        
+        # Draw muzzle flash if firing
+        if self.is_firing:
+            self.draw_muzzle_flash(screen, mx, my)
+        
+        # Draw rocket flash if rocket firing
+        if self.is_rocket_firing:
+            self.draw_rocket_flash(screen, mx, my)
+        
+        # Draw bullets
+        self.draw_bullets(screen)
+        
+        # Draw rockets
+        self.draw_rockets(screen)
+        
+        # Draw enemies
+        self.draw_enemies(screen)
 
     def draw_clouds(self, screen):
         # Draw clouds with smooth scrolling animation
-        import random
-        
-        # Set seed for consistent cloud positions
-        random.seed(42)
+        # Use predefined cloud positions instead of random generation to avoid affecting other random calls
         
         # Base cloud positions - designed for seamless wrapping
         base_cloud_positions = [
@@ -215,3 +409,419 @@ class Game(object):
         
         # Blit the transparent cloud surface to the main screen
         screen.blit(cloud_surface, (x - 25, y - 30))
+    
+    def get_constrained_position(self):
+        # Get mouse position constrained to screen boundaries
+        mx, my = pygame.mouse.get_pos()
+        
+        # Load aircraft image to get dimensions (could be optimized by caching)
+        file_path = os.path.realpath('./res/aircrafts/images/aircraft_1.png')
+        try:
+            alpha_image_surface = pygame.image.load(file_path).convert_alpha()
+            aircraft_width = alpha_image_surface.get_width()
+            aircraft_height = alpha_image_surface.get_height()
+        except:
+            # Fallback dimensions if image can't be loaded
+            aircraft_width = 50
+            aircraft_height = 50
+        
+        # Apply screen boundaries - keep aircraft fully within screen
+        mx = max(0, min(mx, SCREEN_SIZE[0] - aircraft_width))
+        my = max(0, min(my, SCREEN_SIZE[1] - aircraft_height))
+        
+        return mx, my
+    
+    def fire_weapon(self):
+        # Fire a bullet if cooldown allows
+        if self.fire_cooldown <= 0:
+            # Get constrained position for bullet spawn location
+            mx, my = self.get_constrained_position()
+            
+            # Create a new bullet (x, y, velocity_x, velocity_y)
+            # Bullets fire upward from the aircraft position
+            bullet = {
+                'x': mx + 25,  # Center of aircraft (assuming aircraft width ~50px)
+                'y': my,       # Top of aircraft
+                'speed': 8     # Bullet speed (pixels per frame)
+            }
+            
+            self.bullets.append(bullet)
+            
+            # Start muzzle flash animation
+            self.is_firing = True
+            self.muzzle_flash_frame = 0
+            
+            # Set cooldown
+            self.fire_cooldown = self.fire_rate
+            
+            print(f"Fired bullet at ({mx}, {my})")
+    
+    def update_bullets(self):
+        # Update bullet positions and remove bullets that are off-screen
+        bullets_to_remove = []
+        
+        for i, bullet in enumerate(self.bullets):
+            # Move bullet upward
+            bullet['y'] -= bullet['speed']
+            
+            # Remove bullets that have gone off the top of the screen
+            if bullet['y'] < -10:
+                bullets_to_remove.append(i)
+        
+        # Remove bullets in reverse order to maintain correct indices
+        for i in reversed(bullets_to_remove):
+            del self.bullets[i]
+    
+    def update_muzzle_flash(self):
+        # Update muzzle flash animation
+        if self.is_firing:
+            self.muzzle_flash_frame += 1
+            
+            # End muzzle flash after duration
+            if self.muzzle_flash_frame >= self.muzzle_flash_duration:
+                self.is_firing = False
+                self.muzzle_flash_frame = 0
+    
+    def draw_muzzle_flash(self, screen, aircraft_x, aircraft_y):
+        # Draw animated muzzle flash
+        if self.is_firing and self.muzzle_flash_frame < self.muzzle_flash_duration:
+            # Calculate which muzzle flash image to show
+            # We have 24 frames (0-23), cycle through them quickly
+            frame_index = (self.muzzle_flash_frame * 3) % 24  # Speed up animation
+            
+            # Load the muzzle flash image
+            muzzle_file = f'./res/explosions/images/muzzle/muzzle2_{frame_index:04d}.png'
+            muzzle_path = os.path.realpath(muzzle_file)
+            
+            try:
+                muzzle_surface = pygame.image.load(muzzle_path).convert_alpha()
+                
+                # Position muzzle flash at the front of the aircraft
+                muzzle_x = aircraft_x + 25 - (muzzle_surface.get_width() // 2)  # Center horizontally
+                muzzle_y = aircraft_y - 10  # Slightly ahead of aircraft
+                
+                screen.blit(muzzle_surface, (muzzle_x, muzzle_y))
+            except pygame.error:
+                # If image fails to load, draw a simple yellow circle as fallback
+                pygame.draw.circle(screen, (255, 255, 0), (aircraft_x + 25, aircraft_y), 10)
+    
+    def draw_bullets(self, screen):
+        # Draw all active bullets
+        for bullet in self.bullets:
+            # Draw bullet as a small yellow circle
+            pygame.draw.circle(screen, (255, 255, 0), (int(bullet['x']), int(bullet['y'])), 3)
+            # Add a white center for better visibility
+            pygame.draw.circle(screen, (255, 255, 255), (int(bullet['x']), int(bullet['y'])), 1)
+    
+    def fire_rocket(self):
+        # Fire a rocket if cooldown allows
+        if self.rocket_fire_cooldown <= 0:
+            # Get constrained position for rocket spawn location
+            mx, my = self.get_constrained_position()
+            
+            # Create a new rocket (x, y, velocity_x, velocity_y)
+            # Rockets fire upward from the aircraft position, larger and slower than bullets
+            rocket = {
+                'x': mx + 25,  # Center of aircraft (assuming aircraft width ~50px)
+                'y': my,       # Top of aircraft
+                'speed': 6     # Rocket speed (slower than bullets)
+            }
+            
+            self.rockets.append(rocket)
+            
+            # Start rocket flash animation
+            self.is_rocket_firing = True
+            self.rocket_flash_frame = 0
+            
+            # Set cooldown
+            self.rocket_fire_cooldown = self.rocket_fire_rate
+            
+            print(f"Fired rocket at ({mx}, {my})")
+    
+    def update_rockets(self):
+        # Update rocket positions and remove rockets that are off-screen
+        rockets_to_remove = []
+        
+        for i, rocket in enumerate(self.rockets):
+            # Move rocket upward
+            rocket['y'] -= rocket['speed']
+            
+            # Remove rockets that have gone off the top of the screen
+            if rocket['y'] < -10:
+                rockets_to_remove.append(i)
+        
+        # Remove rockets in reverse order to maintain correct indices
+        for i in reversed(rockets_to_remove):
+            del self.rockets[i]
+    
+    def update_rocket_flash(self):
+        # Update rocket flash animation
+        if self.is_rocket_firing:
+            self.rocket_flash_frame += 1
+            
+            # End rocket flash after duration
+            if self.rocket_flash_frame >= self.rocket_flash_duration:
+                self.is_rocket_firing = False
+                self.rocket_flash_frame = 0
+    
+    def draw_rocket_flash(self, screen, aircraft_x, aircraft_y):
+        # Draw animated rocket flame flash
+        if self.is_rocket_firing and self.rocket_flash_frame < self.rocket_flash_duration:
+            # Calculate which rocket flame image to show
+            # We have 16 frames (0-15), cycle through them quickly
+            frame_index = (self.rocket_flash_frame * 2) % 16  # Speed up animation
+            
+            # Load the rocket flame image
+            rocket_file = f'./res/explosions/images/rocket_flame/rocket_1_{frame_index:04d}.png'
+            rocket_path = os.path.realpath(rocket_file)
+            
+            try:
+                rocket_surface = pygame.image.load(rocket_path).convert_alpha()
+                
+                # Position rocket flame at the front of the aircraft
+                rocket_x = aircraft_x + 25 - (rocket_surface.get_width() // 2)  # Center horizontally
+                rocket_y = aircraft_y - 15  # Slightly ahead of aircraft
+                
+                screen.blit(rocket_surface, (rocket_x, rocket_y))
+            except pygame.error:
+                # If image fails to load, draw a simple orange circle as fallback
+                pygame.draw.circle(screen, (255, 165, 0), (aircraft_x + 25, aircraft_y), 12)
+    
+    def draw_rockets(self, screen):
+        # Draw all active rockets
+        for rocket in self.rockets:
+            # Draw rocket as a larger orange circle with red center
+            pygame.draw.circle(screen, (255, 165, 0), (int(rocket['x']), int(rocket['y'])), 5)
+            # Add a red center for better visibility
+            pygame.draw.circle(screen, (255, 0, 0), (int(rocket['x']), int(rocket['y'])), 2)
+    
+    def spawn_enemies(self):
+        # Spawn new enemies if we have fewer than max and cooldown allows
+        if len(self.enemies) < self.max_enemies and self.enemy_spawn_cooldown <= 0:
+            # Choose a random enemy sprite
+            sprite_name = random.choice(self.enemy_sprites)
+            
+            # Calculate enemy size (10% bigger than player)
+            try:
+                player_file = os.path.realpath('./res/aircrafts/images/aircraft_1.png')
+                player_surface = pygame.image.load(player_file).convert_alpha()
+                enemy_width = int(player_surface.get_width() * 1.1)
+                enemy_height = int(player_surface.get_height() * 1.1)
+            except:
+                enemy_width = int(50 * 1.1)  # Fallback: 55px
+                enemy_height = int(50 * 1.1)  # Fallback: 55px
+            
+            # Choose random spawn location (top, left, right only - no bottom spawning)
+            spawn_side = random.choice(['top', 'left', 'right'])
+            
+            if spawn_side == 'top':
+                # Spawn from top, move downward with randomized horizontal position
+                spawn_x = random.randint(0, SCREEN_SIZE[0] - enemy_width)
+                spawn_y = -enemy_height
+                velocity_x = random.uniform(-1.0, 1.0)  # Slight horizontal drift
+                velocity_y = random.uniform(1.0, 3.0)   # Downward movement
+            elif spawn_side == 'left':
+                # Spawn from left side, but only from upper part of screen (top 40% of screen height)
+                spawn_x = -enemy_width
+                upper_portion = int(SCREEN_SIZE[1] * 0.4)  # Only spawn in top 40% of screen
+                spawn_y = random.randint(0, upper_portion - enemy_height)
+                velocity_x = random.uniform(1.0, 3.0)   # Rightward movement
+                velocity_y = random.uniform(-1.0, 1.0)  # Slight vertical drift
+            else:  # spawn_side == 'right'
+                # Spawn from right side, but only from upper part of screen (top 40% of screen height)
+                spawn_x = SCREEN_SIZE[0]
+                upper_portion = int(SCREEN_SIZE[1] * 0.4)  # Only spawn in top 40% of screen
+                spawn_y = random.randint(0, upper_portion - enemy_height)
+                velocity_x = random.uniform(-3.0, -1.0) # Leftward movement
+                velocity_y = random.uniform(-1.0, 1.0)  # Slight vertical drift
+            
+            # Create new enemy with velocity-based movement
+            enemy = {
+                'x': spawn_x,
+                'y': spawn_y,
+                'velocity_x': velocity_x,     # Horizontal movement speed
+                'velocity_y': velocity_y,     # Vertical movement speed
+                'sprite': sprite_name,
+                'surface': None,              # Will be loaded when first drawn
+                'health': self.enemy_health,  # Use configurable enemy health
+                'max_health': self.enemy_health # For visual health indication
+            }
+            
+            self.enemies.append(enemy)
+            
+            # Set spawn cooldown
+            self.enemy_spawn_cooldown = self.enemy_spawn_rate
+            
+            print(f"Spawned enemy {sprite_name} at ({spawn_x}, {spawn_y}) from {spawn_side}")
+    
+    def update_enemies(self):
+        # Update enemy positions and remove enemies that are off-screen
+        enemies_to_remove = []
+        
+        for i, enemy in enumerate(self.enemies):
+            # Move enemy based on velocity
+            enemy['x'] += enemy['velocity_x']
+            enemy['y'] += enemy['velocity_y']
+            
+            # Get enemy dimensions for boundary checking
+            if enemy['surface']:
+                enemy_width = enemy['surface'].get_width()
+                enemy_height = enemy['surface'].get_height()
+            else:
+                enemy_width = int(50 * 1.1)  # Fallback size
+                enemy_height = int(50 * 1.1)
+            
+            # Remove enemies that have gone completely off-screen (with buffer)
+            buffer = 100
+            if (enemy['x'] < -enemy_width - buffer or 
+                enemy['x'] > SCREEN_SIZE[0] + buffer or
+                enemy['y'] < -enemy_height - buffer or 
+                enemy['y'] > SCREEN_SIZE[1] + buffer):
+                enemies_to_remove.append(i)
+        
+        # Remove off-screen enemies in reverse order to maintain correct indices
+        for i in reversed(enemies_to_remove):
+            del self.enemies[i]
+    
+    def draw_enemies(self, screen):
+        # Draw all active enemies
+        for enemy in self.enemies:
+            # Load enemy sprite if not already loaded
+            if enemy['surface'] is None:
+                sprite_file = f'./res/SpaceShipsPack/{enemy["sprite"]}'
+                sprite_path = os.path.realpath(sprite_file)
+                
+                try:
+                    original_surface = pygame.image.load(sprite_path).convert_alpha()
+                    
+                    # Get player character dimensions for scaling reference
+                    player_file = os.path.realpath('./res/aircrafts/images/aircraft_1.png')
+                    try:
+                        player_surface = pygame.image.load(player_file).convert_alpha()
+                        player_width = player_surface.get_width()
+                        player_height = player_surface.get_height()
+                    except:
+                        # Fallback player dimensions
+                        player_width = 50
+                        player_height = 50
+                    
+                    # Calculate enemy size: 10% bigger than player character
+                    target_width = int(player_width * 1.1)
+                    target_height = int(player_height * 1.1)
+                    
+                    # Scale the enemy sprite
+                    enemy['surface'] = pygame.transform.scale(original_surface, (target_width, target_height))
+                    
+                except pygame.error:
+                    # If image fails to load, create a simple red rectangle as fallback
+                    # Make it 10% bigger than default player size
+                    fallback_width = int(50 * 1.1)  # 55px
+                    fallback_height = int(50 * 1.1)  # 55px
+                    enemy['surface'] = pygame.Surface((fallback_width, fallback_height))
+                    enemy['surface'].fill((255, 0, 0))  # Red color
+            
+            # Draw the enemy sprite
+            screen.blit(enemy['surface'], (int(enemy['x']), int(enemy['y'])))
+            
+            # Draw health indicator if enemy is damaged
+            if enemy['health'] < enemy['max_health']:
+                self.draw_enemy_health(screen, enemy)
+    
+    def draw_enemy_health(self, screen, enemy):
+        # Draw a health bar above the enemy
+        bar_width = 40
+        bar_height = 4
+        bar_x = int(enemy['x'] + (enemy['surface'].get_width() - bar_width) // 2)
+        bar_y = int(enemy['y'] - 8)
+        
+        # Background (red)
+        pygame.draw.rect(screen, (255, 0, 0), (bar_x, bar_y, bar_width, bar_height))
+        
+        # Health (green)
+        health_percentage = enemy['health'] / enemy['max_health']
+        health_width = int(bar_width * health_percentage)
+        pygame.draw.rect(screen, (0, 255, 0), (bar_x, bar_y, health_width, bar_height))
+    
+    def check_bullet_enemy_collisions(self):
+        # Check collisions between bullets and enemies
+        bullets_to_remove = []
+        enemies_to_remove = []
+        
+        for bullet_idx, bullet in enumerate(self.bullets):
+            for enemy_idx, enemy in enumerate(self.enemies):
+                if self.check_collision(bullet, enemy):
+                    # Bullet hit enemy
+                    bullets_to_remove.append(bullet_idx)
+                    enemy['health'] -= 1.5  # Bullets do 1.5 damage (4 hits to kill enemy with 6 health)
+                    
+                    print(f"Enemy hit! Health: {enemy['health']}")
+                    
+                    # Check if enemy is destroyed
+                    if enemy['health'] <= 0:
+                        enemies_to_remove.append(enemy_idx)
+                        self.score += 10  # Award points for destroying enemy
+                        print(f"Enemy destroyed! Score: {self.score}")
+                    
+                    break  # Bullet can only hit one enemy
+        
+        # Remove bullets that hit enemies (in reverse order)
+        for idx in reversed(bullets_to_remove):
+            if idx < len(self.bullets):
+                del self.bullets[idx]
+        
+        # Remove destroyed enemies (in reverse order)
+        for idx in reversed(enemies_to_remove):
+            if idx < len(self.enemies):
+                del self.enemies[idx]
+    
+    def check_rocket_enemy_collisions(self):
+        # Check collisions between rockets and enemies
+        rockets_to_remove = []
+        enemies_to_remove = []
+        
+        for rocket_idx, rocket in enumerate(self.rockets):
+            for enemy_idx, enemy in enumerate(self.enemies):
+                if self.check_collision(rocket, enemy):
+                    # Rocket hit enemy
+                    rockets_to_remove.append(rocket_idx)
+                    enemy['health'] -= 2  # Rockets do 2 damage (3 hits to kill enemy with 6 health)
+                    
+                    print(f"Enemy hit by rocket! Health: {enemy['health']}")
+                    
+                    # Check if enemy is destroyed
+                    if enemy['health'] <= 0:
+                        enemies_to_remove.append(enemy_idx)
+                        self.score += 15  # More points for rocket kills
+                        print(f"Enemy destroyed by rocket! Score: {self.score}")
+                    
+                    break  # Rocket can only hit one enemy
+        
+        # Remove rockets that hit enemies (in reverse order)
+        for idx in reversed(rockets_to_remove):
+            if idx < len(self.rockets):
+                del self.rockets[idx]
+        
+        # Remove destroyed enemies (in reverse order)
+        for idx in reversed(enemies_to_remove):
+            if idx < len(self.enemies):
+                del self.enemies[idx]
+    
+    def check_collision(self, projectile, enemy):
+        # Check if a projectile collides with an enemy
+        # Simple rectangular collision detection
+        projectile_radius = 5  # Approximate projectile size
+        
+        # Get enemy dimensions
+        if enemy['surface']:
+            enemy_width = enemy['surface'].get_width()
+            enemy_height = enemy['surface'].get_height()
+        else:
+            # Fallback size (10% bigger than default player size)
+            enemy_width = int(50 * 1.1)  # 55px
+            enemy_height = int(50 * 1.1)  # 55px
+        
+        # Check if projectile is within enemy bounds
+        return (projectile['x'] >= enemy['x'] and 
+                projectile['x'] <= enemy['x'] + enemy_width and
+                projectile['y'] >= enemy['y'] and 
+                projectile['y'] <= enemy['y'] + enemy_height)
