@@ -272,14 +272,53 @@ class Game(object):
         # Display the initial title screen with play instructions
         print('title screen')
         
-        # Create font for the title text
-        new_begin = pygame.font.SysFont("serif", 35)
-        begin_text = new_begin.render("Press space or click to play", True, BLACK)
+        # Create fonts for different text sizes
+        title_font = pygame.font.SysFont("serif", 35)
+        instruction_font = pygame.font.SysFont("serif", 20)
+        controls_font = pygame.font.SysFont("serif", 16)
         
-        # Calculate center position for the text
-        center_x = (SCREEN_SIZE[0] // 2) - (begin_text.get_width() // 2)
-        center_y = (SCREEN_SIZE[1] // 2) - (begin_text.get_height() // 2)
-        screen.blit(begin_text, [center_x, center_y])  # Draw the text
+        # Render text surfaces
+        title_text = title_font.render("PyShoot", True, BLACK)
+        start_text = instruction_font.render("Press space or click to play", True, BLACK)
+        
+        # Control instructions
+        left_click_text = controls_font.render("Left Click: Fire bullets (fast, 4 hits to destroy)", True, BLACK)
+        right_click_text = controls_font.render("Right Click: Fire rockets (slow, 3 hits to destroy)", True, BLACK)
+        move_text = controls_font.render("Mouse: Move character", True, BLACK)
+        pause_text = controls_font.render("P: Pause game | ESC: Main menu", True, BLACK)
+        
+        # Calculate positions - center everything vertically with proper spacing
+        screen_center_x = SCREEN_SIZE[0] // 2
+        screen_center_y = SCREEN_SIZE[1] // 2
+        
+        # Title position
+        title_x = screen_center_x - (title_text.get_width() // 2)
+        title_y = screen_center_y - 100
+        screen.blit(title_text, [title_x, title_y])
+        
+        # Start instruction
+        start_x = screen_center_x - (start_text.get_width() // 2)
+        start_y = title_y + title_text.get_height() + 20
+        screen.blit(start_text, [start_x, start_y])
+        
+        # Control instructions - positioned below start text
+        controls_start_y = start_y + start_text.get_height() + 30
+        
+        # Left click instruction
+        left_x = screen_center_x - (left_click_text.get_width() // 2)
+        screen.blit(left_click_text, [left_x, controls_start_y])
+        
+        # Right click instruction
+        right_x = screen_center_x - (right_click_text.get_width() // 2)
+        screen.blit(right_click_text, [right_x, controls_start_y + 20])
+        
+        # Movement instruction
+        move_x = screen_center_x - (move_text.get_width() // 2)
+        screen.blit(move_text, [move_x, controls_start_y + 40])
+        
+        # Pause instruction
+        pause_x = screen_center_x - (pause_text.get_width() // 2)
+        screen.blit(pause_text, [pause_x, controls_start_y + 60])
 
     def pause_screen(self, screen):
         # Display the pause screen overlay
@@ -825,3 +864,32 @@ class Game(object):
                 projectile['x'] <= enemy['x'] + enemy_width and
                 projectile['y'] >= enemy['y'] and 
                 projectile['y'] <= enemy['y'] + enemy_height)
+
+    def run_main_loop(self):
+        # Main game loop - runs the entire game
+        import sys
+        
+        run_game = True
+        while run_game:
+            # Process events and check if user wants to quit
+            if self.process_events():
+                run_game = False
+            
+            # Run game logic
+            self.run_logic()
+            
+            # Draw everything to screen
+            self.display_frame(screen)
+            
+            # Control frame rate (60 FPS)
+            clock.tick(60)
+        
+        # Clean up and exit
+        pygame.quit()
+        sys.exit()
+        
+# Create a game instance and run the main loop
+if __name__ == "__main__":
+    game = Game(0, 0)  # Create a single game instance with default score and session number
+    game.run_main_loop()  # Run the main game loop
+    
