@@ -725,7 +725,7 @@ class Game(object):
             print(f"Spawned enemy {sprite_name} at ({spawn_x}, {spawn_y}) from {spawn_side}")
     
     def update_enemies(self):
-        # Update enemy positions and remove enemies that are off-screen
+        # Update enemy positions and bounce them back when they hit screen boundaries
         enemies_to_remove = []
         
         for i, enemy in enumerate(self.enemies):
@@ -741,17 +741,45 @@ class Game(object):
                 enemy_width = int(50 * 1.1)  # Fallback size
                 enemy_height = int(50 * 1.1)
             
-            # Remove enemies that have gone completely off-screen (with buffer)
-            buffer = 100
-            if (enemy['x'] < -enemy_width - buffer or 
-                enemy['x'] > SCREEN_SIZE[0] + buffer or
-                enemy['y'] < -enemy_height - buffer or 
-                enemy['y'] > SCREEN_SIZE[1] + buffer):
-                enemies_to_remove.append(i)
+            # Bounce off screen boundaries instead of removing enemies
+            bounced = False
+            
+            # Left boundary - bounce right
+            if enemy['x'] < 0:
+                enemy['x'] = 0
+                enemy['velocity_x'] = abs(enemy['velocity_x'])  # Make velocity positive (rightward)
+                bounced = True
+            
+            # Right boundary - bounce left
+            elif enemy['x'] + enemy_width > SCREEN_SIZE[0]:
+                enemy['x'] = SCREEN_SIZE[0] - enemy_width
+                enemy['velocity_x'] = -abs(enemy['velocity_x'])  # Make velocity negative (leftward)
+                bounced = True
+            
+            # Top boundary - bounce down
+            if enemy['y'] < 0:
+                enemy['y'] = 0
+                enemy['velocity_y'] = abs(enemy['velocity_y'])  # Make velocity positive (downward)
+                bounced = True
+            
+            # Bottom boundary - bounce up
+            elif enemy['y'] + enemy_height > SCREEN_SIZE[1]:
+                enemy['y'] = SCREEN_SIZE[1] - enemy_height
+                enemy['velocity_y'] = -abs(enemy['velocity_y'])  # Make velocity negative (upward)
+                bounced = True
+            
+            # Add some randomness to bounced enemies to make movement more interesting
+            if bounced:
+                # Slightly randomize velocity to prevent predictable patterns
+                enemy['velocity_x'] += random.uniform(-0.5, 0.5)
+                enemy['velocity_y'] += random.uniform(-0.5, 0.5)
+                
+                # Clamp velocities to reasonable ranges
+                enemy['velocity_x'] = max(-3.0, min(3.0, enemy['velocity_x']))
+                enemy['velocity_y'] = max(-3.0, min(3.0, enemy['velocity_y']))
         
-        # Remove off-screen enemies in reverse order to maintain correct indices
-        for i in reversed(enemies_to_remove):
-            del self.enemies[i]
+        # Note: No enemies are removed - they all bounce and stay active
+        # Only remove enemies if they are destroyed by weapons in collision detection methods
     
     def draw_enemies(self, screen):
         # Draw all active enemies
